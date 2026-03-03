@@ -12,6 +12,8 @@ import time, json, re, threading
 from agentmain import GeneraticAgent
 
 st.set_page_config(page_title="Cowork", layout="wide")
+UI_HISTORY_FILE = os.path.join('memory', 'ui_chat_history.json')
+UI_MAX_MESSAGES = 200
 
 @st.cache_resource
 def init():
@@ -28,6 +30,30 @@ agent = init()
 st.title("🖥️ Cowork")
 
 if 'autonomous_enabled' not in st.session_state: st.session_state.autonomous_enabled = False
+
+def load_ui_history():
+    try:
+        if not os.path.exists(UI_HISTORY_FILE): return []
+        with open(UI_HISTORY_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if not isinstance(data, list): return []
+        rows = []
+        for x in data[-UI_MAX_MESSAGES:]:
+            if isinstance(x, dict) and x.get('role') in ['user', 'assistant'] and isinstance(x.get('content'), str):
+                rows.append({'role': x['role'], 'content': x['content']})
+        return rows
+    except:
+        return []
+
+def save_ui_history(messages):
+    try:
+        if not os.path.exists('memory'): os.makedirs('memory')
+        tmp = UI_HISTORY_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(messages[-UI_MAX_MESSAGES:], f, ensure_ascii=False, indent=2)
+        os.replace(tmp, UI_HISTORY_FILE)
+    except:
+        pass
 
 @st.fragment
 def render_sidebar():
@@ -64,7 +90,19 @@ def render_sidebar():
             st.toast("✅ 已允许自主行动")
             st.rerun()
         st.caption("🔴 自主行动已停止")
-with st.sidebar: render_sidebar()
+with st.sidebar:
+    render_sidebar()
+    st.divider()
+    if st.button("Clear chat memory"):
+        st.session_state.messages = []
+        save_ui_history([])
+        agent.history = []
+        try:
+            if os.path.exists('memory/chat_history.json'): os.remove('memory/chat_history.json')
+        except:
+            pass
+        st.toast("Chat memory cleared")
+        st.rerun()
 
 
 def agent_backend_stream(prompt):
@@ -78,12 +116,13 @@ def agent_backend_stream(prompt):
     finally:
         agent.abort()
 
-if "messages" not in st.session_state: st.session_state.messages = []
+if "messages" not in st.session_state: st.session_state.messages = load_ui_history()
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
 if prompt := st.chat_input("请输入指令"):
     st.session_state.messages.append({"role": "user", "content": prompt})
+    save_ui_history(st.session_state.messages)
     with st.chat_message("user"): st.markdown(prompt)
 
     with st.chat_message("assistant"):
@@ -93,6 +132,7 @@ if prompt := st.chat_input("请输入指令"):
             message_placeholder.markdown(response + "▌")
         message_placeholder.markdown(response)
     st.session_state.messages.append({"role": "assistant", "content": response})
+    save_ui_history(st.session_state.messages)
     st.session_state.last_reply_time = int(time.time())
 
 if st.session_state.autonomous_enabled:

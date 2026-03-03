@@ -9,6 +9,10 @@ from sidercall import SiderLLMSession, LLMSession, ToolClient, ClaudeSession, Xa
 from agent_loop import agent_runner_loop, StepOutcome, BaseHandler
 from ga import GenericAgentHandler, smart_format, get_global_memory, format_error
 
+HISTORY_FILE = os.path.join('memory', 'chat_history.json')
+KEY_MEMORY_FILE = os.path.join('memory', 'key_memory.txt')
+MAX_HISTORY_ITEMS = 400
+
 with open('assets/tools_schema.json', 'r', encoding='utf-8') as f:
     TS = f.read()
     TOOLS_SCHEMA = json.loads(TS if os.name == 'nt' else TS.replace('powershell', 'bash'))
@@ -28,6 +32,7 @@ def get_system_prompt():
 class GeneraticAgent:
     def __init__(self):
         if not os.path.exists('temp'): os.makedirs('temp')
+        if not os.path.exists('memory'): os.makedirs('memory')
         from sidercall import mykeys
         llm_sessions = []
         for k, cfg in mykeys.items():
@@ -43,6 +48,7 @@ class GeneraticAgent:
                     max_retries=cfg.get('max_retries', 2),
                     connect_timeout=cfg.get('connect_timeout', 10),
                     read_timeout=cfg.get('read_timeout', 120),
+                    temperature=cfg.get('temperature'),
                 )]
                 if 'xai' in k: llm_sessions += [XaiSession(cfg, mykeys.get('proxy', ''))]
                 if 'sider' in k: llm_sessions += [SiderLLMSession(cfg, default_model=x) for x in \
@@ -51,13 +57,53 @@ class GeneraticAgent:
         if len(llm_sessions) > 0: self.llmclient = ToolClient(llm_sessions, auto_save_tokens=True)
         else: self.llmclient = None
         self.lock = threading.Lock()
-        self.history = []               
+        self.history = self._load_history()
         self.task_queue = queue.Queue() 
         self.is_running, self.stop_sig = False, False
         self.llm_no = 0
         self.inc_out = False
         self.handler = None
         self.verbose = True
+
+    def _load_history(self):
+        try:
+            if not os.path.exists(HISTORY_FILE): return []
+            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if not isinstance(data, list): return []
+            data = [x for x in data if isinstance(x, str)]
+            return data[-MAX_HISTORY_ITEMS:]
+        except:
+            return []
+
+    def _save_history(self):
+        try:
+            data = self.history[-MAX_HISTORY_ITEMS:]
+            tmp = HISTORY_FILE + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, HISTORY_FILE)
+        except:
+            pass
+
+    def _save_key_memory(self, raw_query):
+        q = (raw_query or '').strip()
+        if not q: return
+        markers = ['记住', '请记住', '#记忆', '#memory', '偏好', '约束', '默认']
+        if not any(m in q.lower() for m in [x.lower() for x in markers]): return
+        existing = set()
+        if os.path.exists(KEY_MEMORY_FILE):
+            try:
+                with open(KEY_MEMORY_FILE, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line: existing.add(line.split('] ', 1)[-1])
+            except:
+                pass
+        line = q.replace('\n', ' ')[:300]
+        if line in existing: return
+        with open(KEY_MEMORY_FILE, 'a', encoding='utf-8') as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M')}] {line}\n")
 
     def next_llm(self, n=-1):
         self.llm_no = ((self.llm_no + 1) if n < 0 else n) % len(self.llmclient.backends)
@@ -110,10 +156,12 @@ class GeneraticAgent:
                 if '</file_content>' in full_resp: full_resp = re.sub(r'<file_content>\s*(.*?)\s*</file_content>', r'\n````\n<file_content>\n\1\n</file_content>\n````', full_resp, flags=re.DOTALL)                
                 display_queue.put({'done': full_resp, 'source': source})
                 self.history = handler.history_info
+                self._save_key_memory(raw_query)
             except Exception as e:
                 print(f"Backend Error: {format_error(e)}")
                 display_queue.put({'done': full_resp + f'\n```\n{format_error(e)}\n```', 'source': source})
             finally:
+                self._save_history()
                 self.is_running = self.stop_sig = False
                 self.task_queue.task_done()
                 if self.handler is not None: self.handler.code_stop_signal.append(1)

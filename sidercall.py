@@ -87,7 +87,7 @@ class ClaudeSession:
 
 class LLMSession:
     def __init__(self, api_key, api_base, model, context_win=12000, proxy=None, api_mode="chat_completions",
-                 max_retries=2, connect_timeout=10, read_timeout=120):
+                 max_retries=2, connect_timeout=10, read_timeout=120, temperature=None):
         self.api_key = api_key; self.api_base = api_base.rstrip('/'); self.default_model = model
         self.context_win = context_win; self.raw_msgs = []; self.messages = []
         self.proxies = {"http": proxy, "https": proxy} if proxy else None
@@ -95,6 +95,7 @@ class LLMSession:
         self.max_retries = max(0, int(max_retries))
         self.connect_timeout = max(1, int(connect_timeout))
         self.read_timeout = max(5, int(read_timeout))
+        self.temperature = temperature
         mode = str(api_mode or "chat_completions").strip().lower().replace('-', '_')
         if mode in ["responses", "response"]: self.api_mode = "responses"
         else: self.api_mode = "chat_completions"
@@ -140,15 +141,17 @@ class LLMSession:
             result.append({"role": role, "content": parts})
         return result
 
-    def raw_ask(self, messages, model=None, temperature=0.5):
+    def raw_ask(self, messages, model=None, temperature=None):
         if model is None: model = self.default_model
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", "Accept": "text/event-stream"}
+        if temperature is None: temperature = self.temperature
         if self.api_mode == "responses":
             url = self._endpoint("responses")
-            payload = {"model": model, "input": self._to_responses_input(messages), "temperature": temperature, "stream": True}
+            payload = {"model": model, "input": self._to_responses_input(messages), "stream": True}
         else:
             url = self._endpoint("chat/completions")
-            payload = {"model": model, "messages": messages, "temperature": temperature, "stream": True}
+            payload = {"model": model, "messages": messages, "stream": True}
+        if temperature is not None: payload["temperature"] = temperature
         for attempt in range(self.max_retries + 1):
             streamed_any = False
             try:
