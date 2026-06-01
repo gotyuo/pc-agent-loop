@@ -217,6 +217,12 @@ cp mykey_template.py mykey.py
 # 4. 启动
 python launch.pyw
 ```
+如果运行报错 GTK cannot be loaded
+
+sudo apt install python3-gi gir1.2-gtk-3.0 libgirepository1.0-dev libcairo2-dev
+pip install PyGObject
+```‌‌:ml-citation{ref="7,8" appearance="aggregated" data="citationList"}
+
 
 **同样可在 Android 上运行** — 已在 Termux 上测试通过，通过 `python agentmain.py`（CLI 前端）启动：
 
