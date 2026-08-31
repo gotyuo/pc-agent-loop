@@ -220,7 +220,10 @@ python launch.pyw
 如果运行报错 GTK cannot be loaded
 
 sudo apt install python3-gi gir1.2-gtk-3.0 libgirepository1.0-dev libcairo2-dev
-pip install PyGObject
+
+pip3 install PyGObject
+
+
 ```‌‌:ml-citation{ref="7,8" appearance="aggregated" data="citationList"}
 
 
